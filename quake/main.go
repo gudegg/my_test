@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"github.com/go-resty/resty/v2"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -19,6 +21,8 @@ func init() {
 	validClient.SetRetryWaitTime(time.Second)
 	validClient.SetTimeout(10 * time.Second)
 }
+
+const ResUrl = "https://drive.quark.cn/1/clouddrive/share/sharepage/detail?pr=ucpro&fr=h5&pwd_id=%v&stoken=%v&pdir_fid=%v&force=0&_page=%v&_size=100&_fetch_banner=1&_fetch_share=1&_fetch_total=1&_sort=file_type:asc"
 
 var UserAgent = "Mozilla/5.0 (iPhone;CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko)Version/9.0 Mobile/13B143 Safari/601.1 (compatible; Baiduspider-render/2.0;+http://www.baidu.com/search/spider.html) "
 
@@ -38,6 +42,8 @@ func main() {
 		})
 		if !valid {
 			fmt.Println("失效链接:" + s)
+		} else {
+			fmt.Println("有效链接:" + s)
 		}
 		time.Sleep(time.Second)
 	}
@@ -45,7 +51,7 @@ func main() {
 
 func readSyncFile() []string {
 	result := make([]string, 0)
-	f, err := os.OpenFile("quake_tuijian.txt", os.O_RDONLY, os.ModePerm)
+	f, err := os.OpenFile("quake_top.txt", os.O_RDONLY, os.ModePerm)
 	if err != nil {
 		log.Fatalf("open file error: %v", err)
 		return result
@@ -79,16 +85,62 @@ func Valid(source Source) bool {
 		statusList := []int64{403, 404}
 		code := gjson.Get(resp.String(), "code").String()
 		if lo.Contains(statusList, gjson.Get(resp.String(), "status").Int()) && strings.HasPrefix(code, "410") {
-			fmt.Sprintf("资源失效,shareid=%v,resp=%v", source.ShareId, resp.String())
+			fmt.Println("[quake]资源失效", source.ShareId, resp.String())
 			return false
 		}
-		fmt.Sprintf("获取token失败,%v", resp.String())
+		fmt.Println("[quake]获取token失败,%v", resp.String())
+	} else {
+		token := gjson.Get(resp.String(), "data.stoken")
+		if token.Exists() {
+			reqUrl := fmt.Sprintf(ResUrl, source.ShareId, url.QueryEscape(token.String()), 0, 1)
+			resp, err := validClient.R().SetHeader("user-agent", UserAgent).
+				Get(reqUrl)
+
+			if err == nil && resp.IsSuccess() {
+				data := gjson.Get(resp.String(), "data.list")
+				if data.Exists() {
+					var cnt int
+					var list []Item
+					json.Unmarshal([]byte(data.String()), &list)
+					for _, item := range list {
+						if item.File {
+							cnt++
+						} else {
+							cnt += item.IncludeItems
+						}
+					}
+					if cnt == 0 {
+						fmt.Println("[quake]资源失效,文件为空,", source.ShareId)
+						return false
+					}
+				}
+			}
+		}
+
 	}
-	fmt.Sprintf("资源有效,shareid=%v,fileid=%v,resp=%v", source.ShareId, resp.String())
 	return true
 }
 
 type Source struct {
 	ShareId  string `json:"shareId"`
 	SharePwd string `json:"sharePwd"`
+}
+type Item struct {
+	Fid          string `json:"fid"`
+	FileName     string `json:"file_name"`
+	PdirFid      string `json:"pdir_fid"`
+	Category     int    `json:"category"`
+	FileType     int    `json:"file_type"`
+	Size         int64  `json:"size"`
+	FormatType   string `json:"format_type"`
+	Status       int    `json:"status"`
+	Tags         string `json:"tags"`
+	IncludeItems int    `json:"include_items"`
+	Ban          bool   `json:"ban"`
+	Dir          bool   `json:"dir"`
+	File         bool   `json:"file"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+	ObjCategory  string `json:"obj_category"`
+	DriverId     string `json:"owner_ucid"`
 }
