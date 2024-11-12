@@ -51,7 +51,7 @@ func main() {
 
 func readSyncFile() []string {
 	result := make([]string, 0)
-	f, err := os.OpenFile("quake_top.txt", os.O_RDONLY, os.ModePerm)
+	f, err := os.OpenFile("quake_tuijian.txt", os.O_RDONLY, os.ModePerm)
 	if err != nil {
 		log.Fatalf("open file error: %v", err)
 		return result
